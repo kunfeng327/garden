@@ -1,11 +1,10 @@
 /* 第一人称行走控制（指针锁定 + WASD + 起伏地面 + 头部晃动） */
 import * as THREE from 'three';
 import { terrainHeight, curve } from './terrain.js';
-import { SUN_DIR } from './sky.js';
 
 export const EYE = 1.65;
 
-export function createControls(camera, canvas, sun, { onLock } = {}) {
+export function createControls(camera, canvas, { onLock } = {}) {
   const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, bob: 0 };
   { // 出生点：小径起点，朝路深处
     const p = curve.getPointAt(0.015);
@@ -15,7 +14,10 @@ export function createControls(camera, canvas, sun, { onLock } = {}) {
   }
 
   const keys = {};
-  const onKeyDown = e => { keys[e.code] = true; };
+  const resetKeys = () => { for (const key in keys) delete keys[key]; };
+  const onKeyDown = e => {
+    if (document.pointerLockElement === canvas) keys[e.code] = true;
+  };
   const onKeyUp = e => { keys[e.code] = false; };
   const onMouseMove = e => {
     if (document.pointerLockElement !== canvas) return;
@@ -23,8 +25,10 @@ export function createControls(camera, canvas, sun, { onLock } = {}) {
     player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * 0.0022, -1.25, 1.25);
   };
   const onPointerLockChange = () => {
+    resetKeys();
     if (onLock) onLock(document.pointerLockElement === canvas);
   };
+  addEventListener('blur', resetKeys);
   addEventListener('keydown', onKeyDown);
   addEventListener('keyup', onKeyUp);
   addEventListener('mousemove', onMouseMove);
@@ -57,13 +61,11 @@ export function createControls(camera, canvas, sun, { onLock } = {}) {
     camera.rotateY(player.yaw);
     camera.rotateX(player.pitch);
 
-    // 太阳阴影跟随玩家
-    sun.target.position.set(player.pos.x, 0, player.pos.z - 10);
-    sun.position.set(player.pos.x + SUN_DIR.x, player.pos.y + SUN_DIR.y, player.pos.z - 10 + SUN_DIR.z);
     return player;
   }
 
   function dispose() {
+    removeEventListener('blur', resetKeys);
     removeEventListener('keydown', onKeyDown);
     removeEventListener('keyup', onKeyUp);
     removeEventListener('mousemove', onMouseMove);

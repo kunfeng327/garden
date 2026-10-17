@@ -1,13 +1,33 @@
 /* 程序化树木与灌木：每棵树干形/冠幅/叶色都不同（最初版：光滑噪声球树冠） */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { plantMaterial } from './plantMaterial.js';
 import { rnd, rr, rint, fbm } from './noise.js';
 import { terrainHeight } from './terrain.js';
 
 function foliageMat() {
-  return new THREE.MeshStandardMaterial({
-    color: 0xffffff, vertexColors: true, roughness: 0.9,
-  });
+  return plantMaterial({ vertexColors: true, strength: 0.10 });
 }
+
+// Static branches and crowns share two draw calls per tree. Preserve vertex colors.
+function batchTree(group) {
+  const batches = new Map();
+  for (const mesh of group.children) {
+    mesh.updateMatrix();
+    mesh.geometry.applyMatrix4(mesh.matrix);
+    if (!batches.has(mesh.material)) batches.set(mesh.material, []);
+    batches.get(mesh.material).push(mesh.geometry);
+  }
+  group.clear();
+  for (const [material, geometries] of batches) {
+    const mesh = new THREE.Mesh(mergeGeometries(geometries), material);
+    mesh.castShadow = mesh.receiveShadow = true;
+    group.add(mesh);
+    for (const geometry of geometries) geometry.dispose();
+  }
+  return group;
+}
+
 function makeFoliageBlob(r, detail = 1) {
   const g = new THREE.IcosahedronGeometry(r, detail);
   const p = g.attributes.position, c = new Float32Array(p.count * 3), col = new THREE.Color();
@@ -41,9 +61,8 @@ function barkMaterial() {
   t.colorSpace = THREE.SRGBColorSpace;
   return new THREE.MeshStandardMaterial({ map: t, roughness: 0.95, color: 0xcfb9a0 });
 }
-const barkMat = barkMaterial();
 
-function makeTree(scale = 1, simplify = false) {
+function makeTree(barkMat, scale = 1, simplify = false) {
   const grp = new THREE.Group();
   const trunkH = rr(2.2, 3.6) * scale, trunkR = rr(0.13, 0.22) * scale;
   const pts = [];
@@ -86,14 +105,15 @@ function makeTree(scale = 1, simplify = false) {
     blob.castShadow = blob.receiveShadow = true;
     grp.add(blob);
   }
-  return grp;
+  return batchTree(grp);
 }
 
 export function buildTrees(scene) {
+  const barkMat = barkMaterial();
   // 近景树（部分枝干伸向小径上方 → 斑驳光影）
   const nearSpots = [[-4.5, 4], [-5.5, -14], [4.6, -26], [-5.2, -44], [5.0, -58], [-4.6, -72], [4.2, -88]];
   for (const [x, z] of nearSpots) {
-    const t = makeTree(rr(0.9, 1.3));
+    const t = makeTree(barkMat, rr(0.9, 1.3));
     t.position.set(x + rr(-0.8, 0.8), terrainHeight(x, z) - 0.06, z + rr(-0.8, 0.8));
     t.rotation.y = rr(0, Math.PI * 2);
     scene.add(t);
@@ -101,7 +121,7 @@ export function buildTrees(scene) {
   // 远景大树（背景层次）
   const farSpots = [[-16, -6], [-19, -32], [17, -22], [-18, -56], [18, -48], [-15, -78], [16, -74], [-13, -95], [14, -94]];
   for (const [x, z] of farSpots) {
-    const t = makeTree(rr(1.6, 2.4), true);
+    const t = makeTree(barkMat, rr(1.6, 2.4), true);
     t.position.set(x + rr(-2, 2), terrainHeight(x, z) - 0.1, z + rr(-2, 2));
     scene.add(t);
   }
@@ -110,13 +130,14 @@ export function buildTrees(scene) {
     [-2.7, -52], [2.9, -63], [-2.9, -76], [2.6, -86]];
   for (const [x, z] of shrubSpots) {
     const g = new THREE.Group();
+    const shrubMaterial = foliageMat();
     for (let i = 0, n = rint(3, 5); i < n; i++) {
-      const b = new THREE.Mesh(makeFoliageBlob(rr(0.3, 0.62), 1), foliageMat());
+      const b = new THREE.Mesh(makeFoliageBlob(rr(0.3, 0.62), 1), shrubMaterial);
       b.position.set(rr(-0.4, 0.4), rr(0.15, 0.5), rr(-0.4, 0.4));
       b.castShadow = b.receiveShadow = true;
       g.add(b);
     }
     g.position.set(x + rr(-0.5, 0.5), terrainHeight(x, z), z + rr(-0.5, 0.5));
-    scene.add(g);
+    scene.add(batchTree(g));
   }
 }

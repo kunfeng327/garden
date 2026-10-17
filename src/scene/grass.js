@@ -1,8 +1,8 @@
-/* 数万根实例化草叶，风吹摆动，疏密/颜色随机（最初版） */
+/* 实例化草叶，风吹摆动，疏密/颜色随机（最初版） */
 import * as THREE from 'three';
 import { rnd, rr, fbm, isMobile } from './noise.js';
 import { terrainHeight, distToPath, HALF_PATH } from './terrain.js';
-import { windInject } from './wind.js';
+import { plantMaterial } from './plantMaterial.js';
 
 /** 单片草叶：3 段渐窄，单位高度 1（实例缩放控制真实高度） */
 function bladeGeometry() {
@@ -28,11 +28,8 @@ function bladeGeometry() {
 }
 
 export function buildGrass(scene) {
-  const COUNT = isMobile() ? 26000 : 62000;
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, roughness: 0.85, metalness: 0, side: THREE.DoubleSide,
-  });
-  windInject(mat, '0.13');
+  const COUNT = isMobile() ? 12000 : 28000;
+  const mat = plantMaterial({ strength: 0.12, wind: 0.13 });
   const grass = new THREE.InstancedMesh(bladeGeometry(), mat, COUNT);
   grass.receiveShadow = true;
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(),

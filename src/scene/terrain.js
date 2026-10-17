@@ -10,16 +10,30 @@ export const curve = new THREE.CatmullRomCurve3([
   new THREE.Vector3(-0.4, 0, -96),
 ]);
 
-const PATH_SAMPLES = curve.getSpacedPoints(420);
+const PATH_SAMPLES = curve.getSpacedPoints(420).sort((a, b) => b.z - a.z);
 export const HALF_PATH = 0.85;
 
 export function distToPath(x, z) {
-  let m = Infinity;
-  for (let i = 0; i < PATH_SAMPLES.length; i++) {
-    const p = PATH_SAMPLES[i], dx = p.x - x, dz = p.z - z, d = dx * dx + dz * dz;
-    if (d < m) m = d;
+  // Samples are ordered by decreasing z. Find the nearest z first, then
+  // visit only samples whose z distance can improve the current result.
+  let low = 0, high = PATH_SAMPLES.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (PATH_SAMPLES[mid].z > z) low = mid + 1;
+    else high = mid;
   }
-  return Math.sqrt(m);
+  let best = Infinity;
+  for (let i = low; i < PATH_SAMPLES.length; i++) {
+    const p = PATH_SAMPLES[i], dz = p.z - z;
+    if (dz * dz > best) break;
+    best = Math.min(best, (p.x - x) ** 2 + dz * dz);
+  }
+  for (let i = low - 1; i >= 0; i--) {
+    const p = PATH_SAMPLES[i], dz = p.z - z;
+    if (dz * dz > best) break;
+    best = Math.min(best, (p.x - x) ** 2 + dz * dz);
+  }
+  return Math.sqrt(best);
 }
 
 export function terrainHeight(x, z) {
@@ -57,7 +71,7 @@ function groundTexture() {
 
 /** 构建地面网格（顶点色：路泥 → 路缘 → 草地） */
 export function buildGround(scene) {
-  const geo = new THREE.PlaneGeometry(190, 220, 150, 170);
+  const geo = new THREE.PlaneGeometry(190, 220, 100, 120);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
   const colors = new Float32Array(pos.count * 3);

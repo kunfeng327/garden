@@ -22,7 +22,7 @@ function scatter(mesh, n, fn) {
 
 export function buildDetails(scene) {
   const mobile = isMobile();
-  const D = mobile ? 0.4 : 1; // 移动端细节减量
+  const D = mobile ? 0.3 : 0.6; // 移动端细节减量
 
   // 苔藓（石板缝隙）
   {

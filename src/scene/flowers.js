@@ -1,23 +1,14 @@
-/* 多类型 / 多色 / 含花苞的花丛，成丛 + 零散混合（最初版） */
+/* 实例化花丛：曲面花瓣、叶脉和轻量薄层散射 */
 import * as THREE from 'three';
 import { rnd, rr, rint, fbm, isMobile, mergedGeo } from './noise.js';
 import { terrainHeight, distToPath } from './terrain.js';
-import { windInject } from './wind.js';
+import { plantMaterial, tissueGeometry } from './plantMaterial.js';
 
 function petalMaterial() {
-  const m = new THREE.MeshStandardMaterial({
-    color: 0xffffff, roughness: 0.55, metalness: 0,
-    side: THREE.DoubleSide, emissive: 0x332211, emissiveIntensity: 0.25,
-  });
-  windInject(m, '0.05');
-  return m;
+  return plantMaterial({ detail: 'petal', strength: 0.22, wind: 0.05 });
 }
 function stemMaterial() {
-  const m = new THREE.MeshStandardMaterial({
-    color: 0x4c7a33, roughness: 0.8, side: THREE.DoubleSide,
-  });
-  windInject(m, '0.06');
-  return m;
+  return plantMaterial({ color: 0x59813b, strength: 0.13, wind: 0.05 });
 }
 
 function makeStemGeo() {
@@ -26,8 +17,7 @@ function makeStemGeo() {
   stem.translate(0, 0.5, 0);
   parts.push(stem);
   for (const rot of [0.6, 2.6, 4.4]) {
-    const leaf = new THREE.PlaneGeometry(0.05, 0.22);
-    leaf.translate(0, 0.11, 0);
+    const leaf = tissueGeometry(0.075, 0.24);
     leaf.rotateX(-1.1);
     leaf.rotateY(rot);
     leaf.translate(0, 0.3 + rot * 0.05, 0);
@@ -40,9 +30,8 @@ function makeStemGeo() {
 function daisyHead(petals = 10, plen = 0.17, pwid = 0.075, tilt = 0.5) {
   const parts = [];
   for (let i = 0; i < petals; i++) {
-    const p = new THREE.PlaneGeometry(pwid, plen, 1, 2);
-    p.translate(0, plen * 0.45, 0);
-    p.rotateX(-tilt);
+    const p = tissueGeometry(pwid, plen);
+    p.rotateX(-Math.PI / 2 + tilt * 0.25);
     p.rotateY((i / petals) * Math.PI * 2);
     parts.push(p);
   }
@@ -84,35 +73,39 @@ function budHead() {
 export function buildFlowers(scene) {
   const mobile = isMobile();
   const types = [
-    { count: mobile ? 220 : 520, head: daisyHead(11, 0.17, 0.08, 0.55), center: centerHead(),
+    { count: mobile ? 130 : 330, head: daisyHead(11, 0.17, 0.08, 0.55), center: centerHead(),
       centerColor: 0xd8a018, colors: [0xffffff, 0xffd9ec, 0xffe9f4, 0xf6f0ff],
       sMin: 0.55, sMax: 1.25, budRate: 0.15, zone: [0.9, 4.5] },   // 雏菊系(白/粉)
-    { count: mobile ? 150 : 340, head: tulipHead(), center: null,
+    { count: mobile ? 100 : 220, head: tulipHead(), center: null,
       colors: [0xe75a8f, 0xc05bd8, 0xf2b134, 0xff8f5e, 0xd94f6e],
       sMin: 0.7, sMax: 1.35, budRate: 0.22, zone: [0.8, 3.5] },    // 杯状花
-    { count: mobile ? 140 : 320, head: bellHead(), center: null,
+    { count: mobile ? 90 : 200, head: bellHead(), center: null,
       colors: [0x7f7fdc, 0x9b6fd4, 0x6f93e0, 0xb287e8],
       sMin: 0.5, sMax: 0.95, budRate: 0.18, zone: [1.0, 5.5] },    // 蓝紫风铃
-    { count: mobile ? 180 : 400, head: daisyHead(6, 0.10, 0.06, 0.7), center: centerHead(),
+    { count: mobile ? 110 : 250, head: daisyHead(6, 0.10, 0.06, 0.7), center: centerHead(),
       centerColor: 0xc99414, colors: [0xffd23e, 0xffe86b, 0xf7b93e],
       sMin: 0.4, sMax: 0.8, budRate: 0.12, zone: [0.6, 7] },       // 小黄菊
-    { count: mobile ? 120 : 300, head: daisyHead(9, 0.14, 0.07, 0.6), center: centerHead(),
+    { count: mobile ? 90 : 200, head: daisyHead(9, 0.14, 0.07, 0.6), center: centerHead(),
       centerColor: 0xb06018, colors: [0xe86aa4, 0xd4508a, 0xf39ac2, 0xc44a9a],
       sMin: 0.5, sMax: 1.05, budRate: 0.16, zone: [0.8, 6] },      // 粉色大花
   ];
   const budGeo = budHead();
-  const budMat = new THREE.MeshStandardMaterial({ color: 0x7fa05a, roughness: 0.7 });
+  const budMat = plantMaterial({ color: 0x7fa05a, wind: 0.05 });
   const budBatch = { mesh: new THREE.InstancedMesh(budGeo, budMat, 800), count: 0 };
+  budBatch.mesh.count = 0;
+  budBatch.mesh.receiveShadow = true;
   budBatch.mesh.castShadow = true;
   scene.add(budBatch.mesh);
 
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(),
         P = new THREE.Vector3(), S = new THREE.Vector3(), col = new THREE.Color();
 
+  const budStems = [];
   for (const cfg of types) {
     const stems = new THREE.InstancedMesh(makeStemGeo(), stemMaterial(), cfg.count);
     const heads = new THREE.InstancedMesh(cfg.head, petalMaterial(), cfg.count);
     heads.castShadow = true;
+    heads.receiveShadow = stems.receiveShadow = true;
     const centers = cfg.center
       ? new THREE.InstancedMesh(cfg.center,
           new THREE.MeshStandardMaterial({ color: cfg.centerColor, roughness: 0.7 }), cfg.count)
@@ -128,8 +121,8 @@ export function buildFlowers(scene) {
       clusterCenters.push([cx, cz, rr(0.25, 0.7)]);
     }
 
-    let n = 0;
-    while (n < cfg.count) {
+    let n = 0, attempts = 0;
+    while (n < cfg.count && attempts++ < cfg.count * 100) {
       let x, z;
       if (rnd() < 0.8) {  // 成丛
         const c = clusterCenters[rint(0, clusterCenters.length - 1)];
@@ -154,8 +147,10 @@ export function buildFlowers(scene) {
         budBatch.mesh.setMatrixAt(budBatch.count, M);
         col.setHex(color).lerp(new THREE.Color(0x86a05c), 0.55);
         budBatch.mesh.setColorAt(budBatch.count, col);
+        budStems.push(M.clone());
         budBatch.count++;
         budBatch.mesh.count = budBatch.count;
+        // Compact flower batches separately; append bud stems after the blossoms below.
       } else {
         stems.setMatrixAt(n, M);
         heads.setMatrixAt(n, M);
@@ -170,4 +165,8 @@ export function buildFlowers(scene) {
     scene.add(stems, heads);
     if (centers) scene.add(centers);
   }
+  const budStemMesh = new THREE.InstancedMesh(makeStemGeo(), stemMaterial(), budStems.length);
+  budStems.forEach((matrix, i) => budStemMesh.setMatrixAt(i, matrix));
+  budStemMesh.receiveShadow = true;
+  scene.add(budStemMesh);
 }
