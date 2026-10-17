@@ -1,57 +1,94 @@
-/* 实例化草叶，风吹摆动，疏密/颜色随机（最初版） */
+/* 三层混生草地：共享少量几何变体，保持实例和三角形预算。 */
 import * as THREE from 'three';
-import { rnd, rr, fbm, isMobile } from './noise.js';
+import { rnd, rr, fbm, isMobile, mergedGeo } from './noise.js';
 import { terrainHeight, distToPath, HALF_PATH } from './terrain.js';
 import { plantMaterial } from './plantMaterial.js';
 
-/** 单片草叶：3 段渐窄，单位高度 1（实例缩放控制真实高度） */
-function bladeGeometry() {
-  const pos = [], norm = [], uv = [], idx = [];
-  const W0 = 0.013, segs = 3;
-  for (let i = 0; i <= segs; i++) {
-    const y = i / segs, w = W0 * (1 - y * 0.92), bend = 0.06 * y * y;
-    pos.push(-w, y, bend, w, y, bend);
-    const n = [Math.cos(y * 1.2) * 0.2, 0.6, 0.8];
-    norm.push(...n, ...n);
-    uv.push(0, y, 1, y);
-    if (i < segs) {
+function bladeGeometry(width, bend, segments, lean = 0) {
+  const positions = [], uv = [], indices = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const w = width * (1 - t * 0.97);
+    const x = lean * t * t;
+    positions.push(x - w, t, bend * t * t, x + w, t, bend * t * t);
+    uv.push(0, t, 1, t);
+    if (i < segments) {
       const a = i * 2;
-      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
     }
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(norm, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setIndex(idx);
-  return g;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function grassGeometry(kind, variant) {
+  if (kind === 'turf') return bladeGeometry(0.0035 + variant * 0.0015, 0.10 + variant * 0.09, 2);
+  const parts = [];
+  const blades = kind === 'tuft' ? 3 : 2;
+  for (let i = 0; i < blades; i++) {
+    const blade = bladeGeometry(
+      kind === 'tuft' ? 0.010 + variant * 0.004 : 0.0035,
+      0.10 + i * 0.13 + variant * 0.09,
+      kind === 'tall' && i === 0 ? 3 : 2,
+      (i - 1) * 0.10,
+    );
+    blade.scale(1, i === 0 ? 1 : 0.65 + i * 0.10, 1);
+    blade.rotateY(i * 2.4 + variant * 0.5);
+    blade.translate(Math.sin(i * 2.4) * 0.025, 0, Math.cos(i * 2.4) * 0.025);
+    parts.push(blade);
+  }
+  const geometry = mergedGeo(parts);
+  parts.forEach(part => part.dispose());
+  return geometry;
 }
 
 export function buildGrass(scene) {
-  const COUNT = isMobile() ? 12000 : 28000;
-  const mat = plantMaterial({ strength: 0.12, wind: 0.13 });
-  const grass = new THREE.InstancedMesh(bladeGeometry(), mat, COUNT);
-  grass.receiveShadow = true;
-  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(),
-        P = new THREE.Vector3(), S = new THREE.Vector3(), col = new THREE.Color();
-  let placed = 0, guard = 0;
-  while (placed < COUNT && guard++ < COUNT * 30) {
-    const x = rr(-45, 45), z = rr(-100, 14);
-    const d = distToPath(x, z);
-    if (d < HALF_PATH + 0.08) continue;          // 不长在石板上
-    if (d > 26 && rnd() < 0.72) continue;        // 远处变稀
-    if (rnd() > fbm(x * 0.09 + 11, z * 0.09 + 4) * 1.25) continue; // 疏密斑块
-    P.set(x, terrainHeight(x, z), z);
-    E.set(rr(-0.16, 0.16), rr(0, Math.PI * 2), rr(-0.16, 0.16));
-    Q.setFromEuler(E);
-    S.set(rr(0.8, 1.5), rr(0.16, 0.5) * (d < 2 ? rr(0.5, 0.9) : 1), rr(0.8, 1.5));
-    M.compose(P, Q, S);
-    grass.setMatrixAt(placed, M);
-    if (rnd() < 0.09) col.setHSL(0.13, 0.55, rr(0.35, 0.48));   // 枯草
-    else col.setHSL(rr(0.23, 0.30), rr(0.4, 0.6), rr(0.28, 0.45));
-    grass.setColorAt(placed, col);
-    placed++;
+  // More silhouettes, fewer total triangles than the previous 28k/12k single blades.
+  const total = isMobile() ? 9000 : 22000;
+  const species = [
+    { kind: 'turf', share: 0.66, height: [0.07, 0.20], hue: [0.25, 0.31], wind: 0.05 },
+    { kind: 'tuft', share: 0.25, height: [0.27, 0.60], hue: [0.23, 0.29], wind: 0.10 },
+    { kind: 'tall', share: 0.09, height: [0.60, 1.15], hue: [0.20, 0.26], wind: 0.14 },
+  ];
+  const matrix = new THREE.Matrix4(), quaternion = new THREE.Quaternion();
+  const rotation = new THREE.Euler(), position = new THREE.Vector3();
+  const scale = new THREE.Vector3(), color = new THREE.Color();
+  for (const [index, cfg] of species.entries()) {
+    const count = Math.round(total * cfg.share);
+    const material = plantMaterial({ strength: 0.12, wind: cfg.wind });
+    const batches = [0, 1].map(variant => {
+      const mesh = new THREE.InstancedMesh(grassGeometry(cfg.kind, variant), material, Math.ceil(count / 2));
+      mesh.name = `grass-${cfg.kind}-${variant}`;
+      mesh.count = 0;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      return mesh;
+    });
+    let placed = 0, attempts = 0;
+    while (placed < count && attempts++ < count * 40) {
+      const x = rr(-45, 45), z = rr(-100, 14);
+      const d = distToPath(x, z);
+      if (d < HALF_PATH + 0.08) continue;
+      if (cfg.kind === 'tall' && (d < 2 || d > 18)) continue;
+      if (d > 26 && rnd() < 0.72) continue;
+      const patch = fbm(x * 0.18 + index * 13, z * 0.18 + index * 7);
+      if (rnd() > patch * (cfg.kind === 'tuft' ? 1.15 : 1.6)) continue;
+      position.set(x, terrainHeight(x, z), z);
+      rotation.set(rr(-0.18, 0.18), rr(0, Math.PI * 2), rr(-0.18, 0.18));
+      quaternion.setFromEuler(rotation);
+      scale.set(rr(0.65, 1.45), rr(...cfg.height) * (d < 1.5 ? 0.7 : 1), rr(0.7, 1.4));
+      matrix.compose(position, quaternion, scale);
+      const mesh = batches[placed % batches.length];
+      mesh.setMatrixAt(mesh.count, matrix);
+      if (rnd() < (cfg.kind === 'tall' ? 0.18 : 0.05)) color.setHSL(0.14, 0.35, rr(0.36, 0.48));
+      else color.setHSL(rr(...cfg.hue), rr(0.35, 0.57), rr(0.27, 0.43));
+      mesh.setColorAt(mesh.count++, color);
+      placed++;
+    }
+    for (const mesh of batches) mesh.computeBoundingSphere();
   }
-  grass.count = placed;
-  scene.add(grass);
 }

@@ -41,7 +41,7 @@ export function tissueGeometry(width, length, segments = 4) {
   const geometry = new THREE.PlaneGeometry(width, length, 2, segments);
   const positions = geometry.attributes.position;
   for (let i = 0; i < positions.count; i++) {
-    const t = positions.getY(i) / length + 0.5;
+    const t = THREE.MathUtils.clamp(positions.getY(i) / length + 0.5, 0, 1);
     const x = positions.getX(i);
     positions.setXYZ(i,
       x * (0.12 + 0.88 * Math.pow(Math.sin(Math.PI * t), 0.65)),

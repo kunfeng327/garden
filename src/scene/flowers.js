@@ -11,7 +11,7 @@ function stemMaterial() {
   return plantMaterial({ color: 0x59813b, strength: 0.13, wind: 0.05 });
 }
 
-function makeStemGeo() {
+function makeStemGeo(cluster = false) {
   const parts = [];
   const stem = new THREE.CylinderGeometry(0.006, 0.009, 1, 5, 1);
   stem.translate(0, 0.5, 0);
@@ -23,7 +23,20 @@ function makeStemGeo() {
     leaf.translate(0, 0.3 + rot * 0.05, 0);
     parts.push(leaf);
   }
-  return mergedGeo(parts);
+  if (cluster) {
+    for (const tip of CLUSTER_TIPS) {
+      const start = new THREE.Vector3(0, 0.76, 0);
+      const end = new THREE.Vector3(...tip);
+      const branch = new THREE.CylinderGeometry(0.003, 0.004, start.distanceTo(end), 4, 1, true);
+      branch.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0), end.clone().sub(start).normalize()));
+      branch.translate(...start.add(end).multiplyScalar(0.5).toArray());
+      parts.push(branch);
+    }
+  }
+  const geometry = mergedGeo(parts);
+  parts.forEach(part => part.dispose());
+  return geometry;
 }
 
 /* 花头几何（基座在 y=1，即单位茎顶） */
@@ -70,28 +83,76 @@ function budHead() {
   return s;
 }
 
+// Tiny pointed stars and small single-whorl wildflowers use only two petal segments.
+function wildHead(variant, star = false) {
+  const parts = [], petals = star ? 5 + variant % 2 : 5;
+  for (let i = 0; i < petals; i++) {
+    const petal = tissueGeometry(star ? 0.018 : 0.057, star ? 0.047 : 0.09, 2);
+    petal.rotateX(-Math.PI / 2 + 0.10 + variant * 0.08);
+    petal.rotateY(i / petals * Math.PI * 2 + variant * 0.15);
+    parts.push(petal);
+  }
+  const geometry = mergedGeo(parts);
+  parts.forEach(part => part.dispose());
+  geometry.translate(0, 1, 0);
+  return geometry;
+}
+
+const CLUSTER_TIPS = [[0.075, 0.96, 0], [-0.02, 1.08, 0.07], [-0.08, 0.94, -0.01], [0.01, 1.02, -0.08]];
+function clusterHead(variant) {
+  const parts = CLUSTER_TIPS.map(([x, y, z], i) => {
+    const bloom = wildHead((variant + i) % 3, true);
+    bloom.translate(0, -1, 0);
+    bloom.scale(0.65, 0.65, 0.65);
+    bloom.rotateY(i * 1.7);
+    bloom.translate(x, y, z);
+    return bloom;
+  });
+  const geometry = mergedGeo(parts);
+  parts.forEach(part => part.dispose());
+  return geometry;
+}
+
+function smallCenter() {
+  const geometry = new THREE.CircleGeometry(0.019, 8);
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate(0, 1.004, 0);
+  return geometry;
+}
+
 export function buildFlowers(scene) {
   const mobile = isMobile();
   const types = [
-    { count: mobile ? 130 : 330, head: daisyHead(11, 0.17, 0.08, 0.55), center: centerHead(),
+    { count: mobile ? 70 : 180, head: daisyHead(11, 0.17, 0.08, 0.55), center: centerHead(),
       centerColor: 0xd8a018, colors: [0xffffff, 0xffd9ec, 0xffe9f4, 0xf6f0ff],
       sMin: 0.55, sMax: 1.25, budRate: 0.15, zone: [0.9, 4.5] },   // 雏菊系(白/粉)
-    { count: mobile ? 100 : 220, head: tulipHead(), center: null,
+    { count: mobile ? 50 : 120, head: tulipHead(), center: null,
       colors: [0xe75a8f, 0xc05bd8, 0xf2b134, 0xff8f5e, 0xd94f6e],
       sMin: 0.7, sMax: 1.35, budRate: 0.22, zone: [0.8, 3.5] },    // 杯状花
-    { count: mobile ? 90 : 200, head: bellHead(), center: null,
+    { count: mobile ? 60 : 140, head: bellHead(), center: null,
       colors: [0x7f7fdc, 0x9b6fd4, 0x6f93e0, 0xb287e8],
       sMin: 0.5, sMax: 0.95, budRate: 0.18, zone: [1.0, 5.5] },    // 蓝紫风铃
-    { count: mobile ? 110 : 250, head: daisyHead(6, 0.10, 0.06, 0.7), center: centerHead(),
+    { count: mobile ? 65 : 160, head: daisyHead(6, 0.10, 0.06, 0.7), center: centerHead(),
       centerColor: 0xc99414, colors: [0xffd23e, 0xffe86b, 0xf7b93e],
       sMin: 0.4, sMax: 0.8, budRate: 0.12, zone: [0.6, 7] },       // 小黄菊
-    { count: mobile ? 90 : 200, head: daisyHead(9, 0.14, 0.07, 0.6), center: centerHead(),
+    { count: mobile ? 40 : 100, head: daisyHead(9, 0.14, 0.07, 0.6), center: centerHead(),
       centerColor: 0xb06018, colors: [0xe86aa4, 0xd4508a, 0xf39ac2, 0xc44a9a],
       sMin: 0.5, sMax: 1.05, budRate: 0.16, zone: [0.8, 6] },      // 粉色大花
+    { name: 'star', count: mobile ? 100 : 240, variants: [0, 1, 2].map(v => wildHead(v, true)), center: null,
+      colors: [0xfffaf0, 0xe4dcff, 0xc6d4fa, 0xf4cce5],
+      sMin: 0.24, sMax: 0.52, budRate: 0.08, zone: [0.95, 6], clusterRate: 0.55 },
+    { name: 'cluster', count: mobile ? 85 : 180, variants: [0, 1, 2].map(clusterHead), center: null,
+      colors: [0xfff4dc, 0xe6ddff, 0xf8d2df, 0xe2edc4],
+      sMin: 0.38, sMax: 0.75, budRate: 0.10, zone: [1.1, 7.5], clusterRate: 0.86 },
+    { name: 'single', count: mobile ? 50 : 80, variants: [0, 1, 2].map(v => wildHead(v)), center: smallCenter(),
+      centerColor: 0xcba534, colors: [0xfff8ea, 0xed9ebb, 0xd3bcf3, 0xffe298],
+      sMin: 0.35, sMax: 0.72, budRate: 0.12, zone: [1, 5], clusterRate: 0.35 },
   ];
   const budGeo = budHead();
   const budMat = plantMaterial({ color: 0x7fa05a, wind: 0.05 });
+  const petalMat = petalMaterial(), stemMat = stemMaterial();
   const budBatch = { mesh: new THREE.InstancedMesh(budGeo, budMat, 800), count: 0 };
+  budBatch.mesh.name = 'flower-buds';
   budBatch.mesh.count = 0;
   budBatch.mesh.receiveShadow = true;
   budBatch.mesh.castShadow = true;
@@ -101,15 +162,23 @@ export function buildFlowers(scene) {
         P = new THREE.Vector3(), S = new THREE.Vector3(), col = new THREE.Color();
 
   const budStems = [];
-  for (const cfg of types) {
-    const stems = new THREE.InstancedMesh(makeStemGeo(), stemMaterial(), cfg.count);
-    const heads = new THREE.InstancedMesh(cfg.head, petalMaterial(), cfg.count);
-    heads.castShadow = true;
-    heads.receiveShadow = stems.receiveShadow = true;
+  for (const [typeIndex, cfg] of types.entries()) {
+    const name = cfg.name || `garden-${typeIndex}`;
+    const stems = new THREE.InstancedMesh(makeStemGeo(cfg.name === 'cluster'), stemMat, cfg.count);
+    stems.name = `flower-${name}-stems`;
+    stems.receiveShadow = true;
+    const heads = (cfg.variants || [cfg.head]).map((geometry, variant, variants) => {
+      const mesh = new THREE.InstancedMesh(geometry, petalMat, Math.ceil(cfg.count / variants.length));
+      mesh.name = `flower-${name}-heads-${variant}`;
+      mesh.count = 0;
+      mesh.castShadow = mesh.receiveShadow = true;
+      return mesh;
+    });
     const centers = cfg.center
       ? new THREE.InstancedMesh(cfg.center,
           new THREE.MeshStandardMaterial({ color: cfg.centerColor, roughness: 0.7 }), cfg.count)
       : null;
+    if (centers) centers.name = `flower-${name}-centers`;
 
     const clusters = Math.floor(cfg.count / rr(7, 13));
     const clusterCenters = [];
@@ -124,7 +193,7 @@ export function buildFlowers(scene) {
     let n = 0, attempts = 0;
     while (n < cfg.count && attempts++ < cfg.count * 100) {
       let x, z;
-      if (rnd() < 0.8) {  // 成丛
+      if (rnd() < (cfg.clusterRate ?? 0.75)) {  // 成丛
         const c = clusterCenters[rint(0, clusterCenters.length - 1)];
         const a = rr(0, Math.PI * 2), r = Math.abs(rr(-1, 1)) * c[2];
         x = c[0] + Math.cos(a) * r;
@@ -139,7 +208,7 @@ export function buildFlowers(scene) {
       P.set(x, terrainHeight(x, z) - 0.01, z);
       E.set(rr(-0.09, 0.09), rr(0, Math.PI * 2), rr(-0.09, 0.09));
       Q.setFromEuler(E);
-      S.set(s, s, s);
+      S.set(s * rr(0.75, 1.25), s, s * rr(0.8, 1.2));
       M.compose(P, Q, S);
       const color = cfg.colors[rint(0, cfg.colors.length - 1)];
       if (rnd() < cfg.budRate) {  // 花苞
@@ -153,20 +222,22 @@ export function buildFlowers(scene) {
         // Compact flower batches separately; append bud stems after the blossoms below.
       } else {
         stems.setMatrixAt(n, M);
-        heads.setMatrixAt(n, M);
+        const head = heads[n % heads.length];
+        head.setMatrixAt(head.count, M);
         if (centers) centers.setMatrixAt(n, M);
         col.setHex(color).offsetHSL(rr(-0.02, 0.02), rr(-0.05, 0.08), rr(-0.06, 0.06));
-        heads.setColorAt(n, col);
+        head.setColorAt(head.count++, col);
         n++;
       }
     }
-    stems.count = heads.count = n;
+    stems.count = n;
     if (centers) centers.count = n;
-    scene.add(stems, heads);
+    scene.add(stems, ...heads);
     if (centers) scene.add(centers);
   }
-  const budStemMesh = new THREE.InstancedMesh(makeStemGeo(), stemMaterial(), budStems.length);
+  const budStemMesh = new THREE.InstancedMesh(makeStemGeo(), stemMat, budStems.length);
   budStems.forEach((matrix, i) => budStemMesh.setMatrixAt(i, matrix));
+  budStemMesh.name = 'flower-bud-stems';
   budStemMesh.receiveShadow = true;
   scene.add(budStemMesh);
 }
